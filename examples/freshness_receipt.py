@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import sys
 import urllib.error
@@ -31,12 +32,16 @@ def build_receipt(raw: bytes, retrieved_at: str, slug: str | None = None) -> dic
     if any(not isinstance(summary.get(status), int) for status in STATUSES):
         raise ValueError("Freshness summary has an unexpected status shape")
 
+    source = payload.get("_source")
+    if source is not None and not isinstance(source, dict):
+        raise ValueError("Freshness response has an unexpected _source shape")
+
     receipt: dict[str, Any] = {
-        "receipt_version": 1,
+        "receipt_version": 2,
         "endpoint": FRESHNESS_URL,
         "retrieved_at_utc": retrieved_at,
         "response_sha256": hashlib.sha256(raw).hexdigest(),
-        "source_generated_at": (payload.get("_source") or {}).get("generated_at"),
+        "api_generated_at": (source or {}).get("generated_at"),
         "total_datasets": payload.get("total_datasets"),
         "summary": {status: summary[status] for status in STATUSES},
         "license_url": payload.get("license"),
@@ -98,7 +103,7 @@ def main() -> int:
         raw = fetch_response()
         retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         receipt = build_receipt(raw, retrieved_at, args.slug)
-    except (urllib.error.URLError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, urllib.error.URLError, ValueError, http.client.HTTPException) as exc:
         print(f"freshness receipt failed: {exc}", file=sys.stderr)
         return 1
 
